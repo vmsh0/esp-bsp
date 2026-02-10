@@ -101,7 +101,17 @@ menu "BSP Selector"
         int
         default 1 if BSP_SELECT_ESP_VOCAT
         default 0
+    
+    config BSP_SELECT_GLIB_SEL
+        int
+        default 1 if BSP_SELECT_GLIB
+        default 0
         
+    config BSP_SELECT_GLIB
+        bool "Use GLIB version (with LVGL)"
+        default y
+        help
+            Yes, for use standard BSP. No, for use NoGLIB version of BSP.
 
     choice BSP_SELECT
         prompt "Select BSP"
@@ -120,6 +130,7 @@ menu "BSP Selector"
             bool "ESP_BSP_DEVKIT"
             
         config BSP_SELECT_ESP_BSP_GENERIC
+            depends on BSP_SELECT_GLIB
             bool "ESP_BSP_GENERIC"
         
         config BSP_SELECT_ESP_WROVER_KIT
@@ -127,11 +138,11 @@ menu "BSP Selector"
             bool "ESP_WROVER_KIT"
             
         config BSP_SELECT_ESP32_C3_LCDKIT
-            depends on IDF_TARGET_ESP32C3
+            depends on IDF_TARGET_ESP32C3 && BSP_SELECT_GLIB
             bool "ESP32_C3_LCDKIT"
             
         config BSP_SELECT_ESP32_LYRAT
-            depends on IDF_TARGET_ESP32
+            depends on IDF_TARGET_ESP32 && BSP_SELECT_GLIB
             bool "ESP32_LYRAT"
             
         config BSP_SELECT_ESP32_P4_EYE
@@ -147,7 +158,7 @@ menu "BSP Selector"
             bool "ESP32_S3_EYE"
             
         config BSP_SELECT_ESP32_S3_KORVO_1
-            depends on IDF_TARGET_ESP32S3
+            depends on IDF_TARGET_ESP32S3 && BSP_SELECT_GLIB
             bool "ESP32_S3_KORVO_1"
             
         config BSP_SELECT_ESP32_S3_KORVO_2
@@ -159,7 +170,7 @@ menu "BSP Selector"
             bool "ESP32_S3_LCD_EV_BOARD"
             
         config BSP_SELECT_ESP32_S3_USB_OTG
-            depends on IDF_TARGET_ESP32S3
+            depends on IDF_TARGET_ESP32S3 && BSP_SELECT_GLIB
             bool "ESP32_S3_USB_OTG"
             
         config BSP_SELECT_ESP_BOX_3
