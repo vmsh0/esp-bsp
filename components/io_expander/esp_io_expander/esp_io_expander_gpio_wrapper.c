@@ -11,6 +11,7 @@
 #include "freertos/portmacro.h"
 #include "esp_heap_caps.h"
 #include "esp_err.h"
+#include "esp_check.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "soc/gpio_num.h"
@@ -37,6 +38,8 @@ esp_err_t __real_gpio_set_level(gpio_num_t gpio_num, uint32_t level);
 int __real_gpio_get_level(gpio_num_t gpio_num);
 esp_err_t __real_gpio_set_direction(gpio_num_t gpio_num, gpio_mode_t mode);
 esp_err_t __real_gpio_set_pull_mode(gpio_num_t gpio_num, gpio_pull_mode_t pull);
+esp_err_t __real_gpio_config(const gpio_config_t *pGPIOConfig);
+esp_err_t __real_gpio_reset_pin(gpio_num_t gpio_num);
 
 static bool find_ioexp_for_num(uint32_t gpio_num, esp_io_expander_handle_t *out_handler, uint32_t *out_pin_mask)
 {
@@ -60,6 +63,72 @@ static bool find_ioexp_for_num(uint32_t gpio_num, esp_io_expander_handle_t *out_
     }
     portEXIT_CRITICAL(&s_ioexp_lock);
     return found;
+}
+
+static esp_err_t io_expander_gpio_config(uint32_t gpio_num, const gpio_config_t *config)
+{
+    if (config == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t err = ESP_OK;
+    esp_io_expander_handle_t handle = NULL;
+    uint32_t pin_mask = 0;
+    if (!find_ioexp_for_num((uint32_t)gpio_num, &handle, &pin_mask)) {
+        ESP_LOGE(TAG, "GPIO %d is not assigned to any IO Expander", gpio_num);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if ((config->mode) & GPIO_MODE_DEF_INPUT) {
+        err = esp_io_expander_set_dir(handle, pin_mask, IO_EXPANDER_INPUT);
+    } else if ((config->mode) & GPIO_MODE_DEF_OUTPUT) {
+        err = esp_io_expander_set_dir(handle, pin_mask, IO_EXPANDER_OUTPUT);
+        if (handle->write_highz_reg) {
+            if ((config->mode) & GPIO_MODE_DEF_OD) {
+                err = esp_io_expander_set_output_mode(handle, pin_mask, IO_EXPANDER_OUTPUT_MODE_OPEN_DRAIN);
+            } else {
+                err = esp_io_expander_set_output_mode(handle, pin_mask, IO_EXPANDER_OUTPUT_MODE_PUSH_PULL);
+            }
+        } else if ((config->mode) & GPIO_MODE_DEF_OD) {
+            ESP_LOGW(TAG, "IO Expander GPIO does not support open drain mode.");
+        }
+    } else {
+        ESP_LOGE(TAG, "Unsupported GPIO mode %d for IO Expander GPIO %d", config->mode, gpio_num);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_io_expander_pullupdown_t pull_mode = IO_EXPANDER_PULL_NONE;
+    bool pull_mode_valid = true;
+    if (config->pull_up_en && config->pull_down_en) {
+        pull_mode_valid = false;
+    } else if (config->pull_up_en) {
+        if (!handle->write_pullup_en_reg) {
+            pull_mode_valid = false;
+        } else {
+            pull_mode = IO_EXPANDER_PULL_UP;
+        }
+    } else if (config->pull_down_en) {
+        if (!handle->write_pullup_en_reg || !handle->write_pullup_sel_reg) {
+            pull_mode_valid = false;
+        } else {
+            pull_mode = IO_EXPANDER_PULL_DOWN;
+        }
+    } else {
+        pull_mode = IO_EXPANDER_PULL_NONE;
+    }
+
+    if (pull_mode_valid) {
+        if (handle->write_pullup_en_reg) {
+            err = esp_io_expander_set_pullupdown(handle, pin_mask, pull_mode);
+        }
+    } else {
+        ESP_LOGE(TAG, "Unsupported GPIO pull mode for IO Expander GPIO %d", gpio_num);
+    }
+
+    if (config->intr_type) {
+        ESP_LOGW(TAG, "IO Expander does not support interrupts.");
+    }
+
+    return err;
 }
 
 esp_err_t esp_io_expander_gpio_wrapper_append_handler(esp_io_expander_handle_t handler, uint32_t start_io_num)
@@ -152,13 +221,13 @@ esp_err_t __wrap_gpio_set_level(gpio_num_t gpio_num, uint32_t level)
         return __real_gpio_set_level(gpio_num, level);
     }
     // Redirect GPIO set level calls to ESP IO Expander here
-    esp_io_expander_handle_t handler = NULL;
+    esp_io_expander_handle_t handle = NULL;
     uint32_t pin_mask = 0;
-    if (!find_ioexp_for_num((uint32_t)gpio_num, &handler, &pin_mask)) {
+    if (!find_ioexp_for_num((uint32_t)gpio_num, &handle, &pin_mask)) {
         ESP_LOGE(TAG, "GPIO %d is not assigned to any IO Expander", gpio_num);
         return ESP_ERR_INVALID_ARG;
     }
-    return esp_io_expander_set_level(handler, pin_mask, (uint8_t)(level ? 1 : 0));
+    return esp_io_expander_set_level(handle, pin_mask, (uint8_t)(level ? 1 : 0));
 }
 
 int __wrap_gpio_get_level(gpio_num_t gpio_num)
@@ -168,14 +237,14 @@ int __wrap_gpio_get_level(gpio_num_t gpio_num)
         return __real_gpio_get_level(gpio_num);
     }
     // Redirect GPIO get level calls to ESP IO Expander here
-    esp_io_expander_handle_t handler = NULL;
+    esp_io_expander_handle_t handle = NULL;
     uint32_t pin_mask = 0;
-    if (!find_ioexp_for_num((uint32_t)gpio_num, &handler, &pin_mask)) {
+    if (!find_ioexp_for_num((uint32_t)gpio_num, &handle, &pin_mask)) {
         ESP_LOGE(TAG, "GPIO %d is not assigned to any IO Expander", gpio_num);
         return -1; // Indicate error
     }
     uint32_t level_mask = 0;
-    esp_err_t err = esp_io_expander_get_level(handler, pin_mask, &level_mask);
+    esp_err_t err = esp_io_expander_get_level(handle, pin_mask, &level_mask);
     if (err != ESP_OK) {
         return -1; // Indicate error
     }
@@ -189,9 +258,9 @@ esp_err_t __wrap_gpio_set_direction(gpio_num_t gpio_num, gpio_mode_t mode)
         return __real_gpio_set_direction(gpio_num, mode);
     }
     // Redirect GPIO set direction calls to ESP IO Expander here
-    esp_io_expander_handle_t handler = NULL;
+    esp_io_expander_handle_t handle = NULL;
     uint32_t pin_mask = 0;
-    if (!find_ioexp_for_num((uint32_t)gpio_num, &handler, &pin_mask)) {
+    if (!find_ioexp_for_num((uint32_t)gpio_num, &handle, &pin_mask)) {
         ESP_LOGE(TAG, "GPIO %d is not assigned to any IO Expander", gpio_num);
         return ESP_ERR_INVALID_ARG;
     }
@@ -209,7 +278,7 @@ esp_err_t __wrap_gpio_set_direction(gpio_num_t gpio_num, gpio_mode_t mode)
     case GPIO_MODE_OUTPUT_OD:
         dir = IO_EXPANDER_OUTPUT;
         out_mode = IO_EXPANDER_OUTPUT_MODE_OPEN_DRAIN;
-        if (!handler->write_highz_reg) {
+        if (!handle->write_highz_reg) {
             mode_valid = false;
         }
         break;
@@ -220,9 +289,9 @@ esp_err_t __wrap_gpio_set_direction(gpio_num_t gpio_num, gpio_mode_t mode)
         ESP_LOGE(TAG, "Unsupported GPIO mode %d for IO Expander GPIO %d", mode, gpio_num);
         return ESP_ERR_INVALID_ARG;
     }
-    esp_err_t err = esp_io_expander_set_dir(handler, pin_mask, dir);
-    if (err == ESP_OK && dir == IO_EXPANDER_OUTPUT && handler->write_highz_reg) {
-        err = esp_io_expander_set_output_mode(handler, pin_mask, out_mode);
+    esp_err_t err = esp_io_expander_set_dir(handle, pin_mask, dir);
+    if (err == ESP_OK && dir == IO_EXPANDER_OUTPUT && handle->write_highz_reg) {
+        err = esp_io_expander_set_output_mode(handle, pin_mask, out_mode);
     }
     return err;
 }
@@ -234,9 +303,9 @@ esp_err_t __wrap_gpio_set_pull_mode(gpio_num_t gpio_num, gpio_pull_mode_t pull)
         return __real_gpio_set_pull_mode(gpio_num, pull);
     }
     // Redirect GPIO set pull mode calls to ESP IO Expander here
-    esp_io_expander_handle_t handler = NULL;
+    esp_io_expander_handle_t handle = NULL;
     uint32_t pin_mask = 0;
-    if (!find_ioexp_for_num((uint32_t)gpio_num, &handler, &pin_mask)) {
+    if (!find_ioexp_for_num((uint32_t)gpio_num, &handle, &pin_mask)) {
         ESP_LOGE(TAG, "GPIO %d is not assigned to any IO Expander", gpio_num);
         return ESP_ERR_INVALID_ARG;
     }
@@ -244,14 +313,14 @@ esp_err_t __wrap_gpio_set_pull_mode(gpio_num_t gpio_num, gpio_pull_mode_t pull)
     bool pud_valid = true;
     switch (pull) {
     case GPIO_PULLUP_ONLY:
-        if (!handler->write_pullup_en_reg) {
+        if (!handle->write_pullup_en_reg) {
             pud_valid = false;
         } else {
             pud = IO_EXPANDER_PULL_UP;
         }
         break;
     case GPIO_PULLDOWN_ONLY:
-        if (!handler->write_pullup_en_reg || !handler->write_pullup_sel_reg) {
+        if (!handle->write_pullup_en_reg || !handle->write_pullup_sel_reg) {
             pud_valid = false;
         } else {
             pud = IO_EXPANDER_PULL_DOWN;
@@ -268,5 +337,60 @@ esp_err_t __wrap_gpio_set_pull_mode(gpio_num_t gpio_num, gpio_pull_mode_t pull)
         ESP_LOGE(TAG, "Unsupported GPIO pull mode %d for IO Expander GPIO %d", pull, gpio_num);
         return ESP_ERR_INVALID_ARG;
     }
-    return esp_io_expander_set_pullupdown(handler, pin_mask, pud);
+    return esp_io_expander_set_pullupdown(handle, pin_mask, pud);
+}
+
+esp_err_t __wrap_gpio_config(const gpio_config_t *pGPIOConfig)
+{
+    esp_err_t ret = ESP_OK;
+    gpio_config_t cfg = *pGPIOConfig;
+    uint64_t invalid_mask = cfg.pin_bit_mask & ~SOC_GPIO_VALID_GPIO_MASK;
+
+    // Handle invalid pins first (IO expander)
+    while (invalid_mask) {
+        int io_num = __builtin_ctzll(invalid_mask);
+        invalid_mask &= invalid_mask - 1;
+
+        io_expander_gpio_config(io_num, &cfg);
+        cfg.pin_bit_mask &= ~(1ULL << io_num);
+    }
+
+    if (cfg.pin_bit_mask) {
+        // Call the ESP-IDF implementation for regular GPIOs
+        return __real_gpio_config(&cfg);
+    }
+
+    return ret;
+}
+
+esp_err_t __wrap_gpio_reset_pin(gpio_num_t gpio_num)
+{
+    esp_err_t ret = ESP_OK;
+    if (gpio_num < GPIO_NUM_MAX) {
+        // Call the ESP-IDF implementation for regular GPIOs
+        return __real_gpio_reset_pin(gpio_num);
+    }
+    // Redirect GPIO set direction calls to ESP IO Expander here
+    esp_io_expander_handle_t handle = NULL;
+    uint32_t pin_mask = 0;
+    if (!find_ioexp_for_num((uint32_t)gpio_num, &handle, &pin_mask)) {
+        ESP_LOGE(TAG, "GPIO %d is not assigned to any IO Expander", gpio_num);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Set level to LOW
+    ESP_RETURN_ON_ERROR(esp_io_expander_set_level(handle, pin_mask, (uint8_t)(0)), TAG,
+                        "Set level of IO expander pin %d failed.", gpio_num);
+
+    // Set as input
+    ESP_RETURN_ON_ERROR(esp_io_expander_set_dir(handle, pin_mask, IO_EXPANDER_INPUT), TAG,
+                        "Set direction of IO expander pin %d failed.", gpio_num);
+
+    // Remove pull resistors
+    if (handle->write_pullup_en_reg) {
+        ESP_RETURN_ON_ERROR(esp_io_expander_set_pullupdown(handle, pin_mask, IO_EXPANDER_PULL_NONE), TAG,
+                            "Set pull mode of IO expander pin %d failed.", gpio_num);
+    }
+
+    return ret;
 }
