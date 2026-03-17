@@ -36,6 +36,7 @@ jobs:
     outputs:
       ignored_failure: ${{ steps.ignored-failure.outputs.failed }}
     strategy:
+      fail-fast: ${{ github.event_name != 'schedule' }}
       matrix:
         idf_ver:
           - "latest"
