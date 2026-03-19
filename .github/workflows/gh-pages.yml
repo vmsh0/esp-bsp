@@ -9,6 +9,10 @@ on:
   push:
       branches:
       - master
+      
+permissions:
+  pages: write
+  id-token: write
 
 jobs:
 

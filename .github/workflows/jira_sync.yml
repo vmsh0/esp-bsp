@@ -9,6 +9,9 @@ on:
     types: [opened]
   issue_comment:
 
+permissions:
+  issues: write
+
 jobs:
   jira_sync:
     name: Sync Jira with Github
