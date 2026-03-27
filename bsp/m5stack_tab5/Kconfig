@@ -12,17 +12,6 @@ menu "Board Support Package(m5stack_tab5)"
             range 0 1
             help
                 Pick the I2C you want to use.
-
-        config BSP_I2C_FAST_MODE
-            bool "Enable I2C fast mode"
-            default y
-            help
-                I2C has two speed modes: normal (100kHz) and fast (400kHz).
-
-        config BSP_I2C_CLK_SPEED_HZ
-            int
-            default 400000 if BSP_I2C_FAST_MODE
-            default 100000
     endmenu
     menu "SPIFFS - Virtual File System"
         config BSP_SPIFFS_FORMAT_ON_MOUNT_FAIL
