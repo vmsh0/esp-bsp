@@ -8,6 +8,10 @@ on:
       - 'SquareLine/**'
       - '.github/workflows/squareline.yml'
 
+# Required for uploading the release
+permissions:
+  contents: write
+
 jobs:
   create-squareline-packages:
     runs-on: ubuntu-24.04
