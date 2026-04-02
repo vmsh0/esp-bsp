@@ -189,22 +189,6 @@ jobs:
             benchmark_*.md
             benchmark_*.json
             benchmark.json
-      - name: Check if benchmark files exist
-        id: check_files
-        run: |
-          if ls benchmark_*.json benchmark_*.md 2>/dev/null; then
-            echo "benchmark_files_exist=true" >> $GITHUB_ENV
-          else
-            echo "benchmark_files_exist=false" >> $GITHUB_ENV
-          fi
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: github.ref_name == 'master' && env.benchmark_files_exist == 'true'
-        with:
-          name: ${{ env.BENCHMARK_RESULT_NAME }}
-          path: |
-            benchmark_*.md
-            benchmark_*.json
       - name: Update benchmark release
         uses: pyTooling/Actions/releaser@r0
         if: github.ref_name == 'master' && env.benchmark_files_exist == 'true'
