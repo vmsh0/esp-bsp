@@ -43,6 +43,12 @@
 #define CONFIG_LV_DRAW_BUF_ALIGN 1
 #endif
 
+#if CONFIG_LCD_RGB_ISR_IRAM_SAFE
+#define LVGL_PORT_RGB_IRAM IRAM_ATTR
+#else
+#define LVGL_PORT_RBG_IRAM
+#endif
+
 static const char *TAG = "LVGL";
 
 /*******************************************************************************
@@ -509,7 +515,7 @@ static bool lvgl_port_flush_dpi_vsync_ready_callback(esp_lcd_panel_handle_t pane
 #endif
 
 #if CONFIG_IDF_TARGET_ESP32S3 && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
-static bool lvgl_port_flush_rgb_vsync_ready_callback(esp_lcd_panel_handle_t panel_io,
+static LVGL_PORT_RGB_IRAM bool lvgl_port_flush_rgb_vsync_ready_callback(esp_lcd_panel_handle_t panel_io,
         const esp_lcd_rgb_panel_event_data_t *edata, void *user_ctx)
 {
     BaseType_t need_yield = pdFALSE;
